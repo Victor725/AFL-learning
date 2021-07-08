@@ -1,5 +1,11 @@
 # AFL代码
 
+## afl-gcc
+
+
+
+
+
 ## afl-as
 
 从main开始
@@ -9,10 +15,17 @@
 
 * 打开输入文件
 * 进入大while循环，进行插桩
-  * 
+  * 进行条件判断，满足条件，则进行插桩，然后插入原本的代码，pass_thru模式下，跳过本行
+  * 由于只对.text节进行处理，所以进行一定的筛选
+    * 检测.code，检测语法更改，检测`__asm__`块
+  * 在 main函数，GCC branch label，clang branch label，conditional branches处插入指令
+    * 除了jnz等以外，其他的一些标签之类的，有概率插入
+* 插入main_payload
+* 输出提示信息等
 
-1. fork出子进程来执行as
-2. 等待子进程结束
+3. fork出子进程来执行as，进行汇编
+
+4. 等待子进程结束
 
 
 

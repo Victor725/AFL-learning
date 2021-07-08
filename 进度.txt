@@ -1,2 +1,1 @@
-afl-as
-	main->add_instrumentations()
+afl-gcc
