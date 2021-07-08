@@ -1,8 +1,18 @@
 # AFL代码
 
-## afl-gcc
+## afl-as
 
+从main开始
 
+1. 调用edit_params，调整要传递给as的参数
+2. 调用add_instrumentation()来插桩
+
+* 打开输入文件
+* 进入大while循环，进行插桩
+  * 
+
+1. fork出子进程来执行as
+2. 等待子进程结束
 
 
 

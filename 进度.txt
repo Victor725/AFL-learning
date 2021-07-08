@@ -1,1 +1,2 @@
-重新看，看到了主循环中的fuzz_one
+afl-as
+	main->add_instrumentations()
