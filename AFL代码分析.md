@@ -153,7 +153,7 @@ perform_dry_run(use_argv);
 
     * 调用run_target，通知forkserver准备fork并fuzz（将trace_bits设为0，将信息写入管道，读取状态管道）  
 
-      * 注意！！！这里要结合插桩的代码进行理解，一些fuzz的逻辑隐含在插入被测程序的代码中（如fork出子进程，等待父进程指令，运行过程中更新trace_bits（在main_payload的__afl_store处进行）等）
+      * 注意！！！这里要结合插桩的代码进行理解，一些fuzz的逻辑隐含在插入被测程序的代码中（如fork出子进程，等待父进程指令，运行过程中更新trace_bits（在trampoline_fmt_64进行）等）
 
     * 看是否出现了新情况
     
@@ -237,3 +237,161 @@ perform_dry_run(use_argv);
   * 进行一系列位反转等调整操作，调整后进行fuzz，若出错，则跳出
 
 12. 写入virgin_bits，写入状态文件及其他信息，释放资源，退出
+
+
+
+
+
+## qemu-mode
+
+qemu-mode文件夹内最开始有build_qemu_support.sh，paches，paches内有5个diff文件，用于patch下载好的qemu
+
+### build_qemu_support.sh
+
+1. 首先，进行一系列检查，如系统类型是否是Linux等
+2. 下载qemu
+3. 解压
+4. 检查cpu_target
+5. 用paches中的diff文件对qemu内文件进行patch
+6. 编译
+7. 将qemu拷贝为afl目录下的afl-qemu-trace，并测试是否生效
+
+
+
+### patch分析
+
+1. elfload.diff，加入寻找入口点和start，end的代码
+
+2. cpu_exec.diff 加入头文件和宏定义
+
+   ```c
+   +    AFL_QEMU_CPU_SNIPPET2;
+   ...
+                if (!tb) {
+                    /* if no translated code available, then translate it now */
+                    tb = tb_gen_code(cpu, pc, cs_base, flags, 0);
+   +                AFL_QEMU_CPU_SNIPPET1;
+                }
+    
+                mmap_unlock();
+   ```
+
+   这两个宏在afl-qemu-cpu-ini.h中定义，AFL_QEMU_CPU_SNIPPET1，通知父进程遇到了一个尚未翻译的新块，并告诉它也在自己的上下文中进行翻译，从而减小下一次fork时的开销
+
+   AFL_QEMU_CPU_SNIPPET2，就是每次qemu执行一个基本块的时候，afl去check一下这个基本块的地址是不是目标程序的entry_point。如果是，就启动forkerver。如果不是entry_point的话就看一下是不是覆盖了新的分支。如果是的话就记录。
+
+3. configure.diff 更改包含的文件
+4. memfd.diff 更改包含的文件
+5. syscall.diff 更改处理错误的代码
+
+总的来看，用于实现AFL主要逻辑的patch就是cpu_exec.diff，在其中完成了记录覆盖情况的逻辑
+
+
+
+
+
+## 最后总结
+
+进行fuzz时，若有源代码，则先用afl-gcc对其进行编译，afl-gcc只是一层gcc的封装，同时将汇编器改为afl-as，在汇编的时候，afl-as对代码进行插桩，插入记录覆盖和最后计算覆盖率的代码，之后用afl-fuzz进行测试，这期间会fork出forkserver，由它来通过接受fuzzer的消息，fork出进程来真正执行测试用例。
+
+若没有源代码，则用qemu模式进行fuzz，afl-fuzz主函数内会判断是否使用了qemu模式，若使用了，会在之后调用get_qemu_argv调整传给qemu的命令，之后此命令作为use_argv传入perform_dry_run等函数，运行qemu进行测试
+
+
+
+## demo测试
+
+编写测试用代码
+
+```c
+#include <stdio.h>
+
+#include <stdlib.h>
+
+int main(int argc, char **argv) {
+
+  char ptr[20];
+
+  if(argc>1){
+
+           FILE *fp = fopen(argv[1], "r");
+
+           fgets(ptr, sizeof(ptr), fp);
+
+  }
+
+  else{
+
+          fgets(ptr, sizeof(ptr), stdin);
+
+  }
+
+  printf("%s", ptr);
+
+  if(ptr[0] == 'd') {
+
+          if(ptr[1] == 'e') {
+
+                  if(ptr[2] == 'a') {
+
+                          if(ptr[3] == 'd') {
+
+                                  if(ptr[4] == 'b') {
+
+                                          if(ptr[5] == 'e') {
+
+                                                  if(ptr[6] == 'e') {
+
+                                                          if(ptr[7] == 'f') {
+
+                                                                  abort();
+
+                                                          }
+
+                                                          else    printf("%c",ptr[7]);
+
+                                                   }
+
+                                                   else    printf("%c",ptr[6]);
+
+                                          }
+
+                                          else    printf("%c",ptr[5]);
+
+                                  }
+
+                                  else    printf("%c",ptr[4]);
+
+                          }
+
+                          else    printf("%c",ptr[3]);
+
+                  }
+
+                  else    printf("%c",ptr[2]);
+
+          }
+
+          else    printf("%c",ptr[1]);
+
+  }
+
+  else    printf("%c",ptr[0]);
+
+  return 0;
+
+}
+```
+
+用afl-gcc和gcc分别编译一次，输出为t1和t，用普通模式和qemu模式进行测试
+
+普通模式输出结果：
+
+![image-20210711175013719](C:\Users\Victor\AppData\Roaming\Typora\typora-user-images\image-20210711175013719.png)
+
+![image-20210711180014123](C:\Users\Victor\AppData\Roaming\Typora\typora-user-images\image-20210711180014123.png)
+
+qemu模式输出结果：
+
+![image-20210711174759444](C:\Users\Victor\AppData\Roaming\Typora\typora-user-images\image-20210711174759444.png)
+
+![image-20210711174541473](C:\Users\Victor\AppData\Roaming\Typora\typora-user-images\image-20210711174541473.png)
